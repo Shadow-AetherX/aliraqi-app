@@ -1,8 +1,8 @@
 // قاعدة البيانات المحلية (IndexedDB) — مصدر الحقيقة للمخزون هو دفتر الحركات movements مش رقم رصيد ثابت
-const DB_NAME='aliraqi', DB_VER=1;
+const DB_NAME='aliraqi', DB_VER=2;
 const STORES={
-  products:{keyPath:'ProductID'}, customers:{keyPath:'CustomerID'}, warehouses:{keyPath:'WarehouseID'},
-  invoices:{keyPath:'InvoiceID'}, invoice_lines:{keyPath:'LineID',indexes:['InvoiceID','ProductID']},
+  products:{keyPath:'ProductID'}, customers:{keyPath:'CustomerID',indexes:['Phone']}, warehouses:{keyPath:'WarehouseID'},
+  invoices:{keyPath:'InvoiceID',indexes:['CustomerID','DateTime']}, invoice_lines:{keyPath:'LineID',indexes:['InvoiceID','ProductID']},
   movements:{keyPath:'MovementID',indexes:['ProductID','WarehouseID','ReferenceID']},
   users:{keyPath:'UserID'}, roles:{keyPath:'RoleID'}, audit:{keyPath:'AuditID'},
   syncq:{keyPath:'OpID',indexes:['Status']}, settings:{keyPath:'key'}
@@ -12,13 +12,12 @@ export function openDB(){
   if(_db) return Promise.resolve(_db);
   return new Promise((res,rej)=>{
     const rq=indexedDB.open(DB_NAME,DB_VER);
-    rq.onupgradeneeded=()=>{const db=rq.result;
+    rq.onupgradeneeded=()=>{const db=rq.result,t=rq.transaction;
       for(const [n,c] of Object.entries(STORES)){
-        if(db.objectStoreNames.contains(n)) continue;
-        const s=db.createObjectStore(n,{keyPath:c.keyPath});
-        (c.indexes||[]).forEach(i=>s.createIndex(i,i));
+        const s=db.objectStoreNames.contains(n)?t.objectStore(n):db.createObjectStore(n,{keyPath:c.keyPath});
+        (c.indexes||[]).forEach(i=>{if(!s.indexNames.contains(i)) s.createIndex(i,i)});   // ترقية آمنة: بتضيف الفهارس من غير ما تلمس البيانات
       }};
-    rq.onsuccess=()=>{_db=rq.result;res(_db)}; rq.onerror=()=>rej(rq.error);
+    rq.onsuccess=()=>{_db=rq.result;_db.onversionchange=()=>{_db.close();_db=null};res(_db)}; rq.onerror=()=>rej(rq.error);
   });
 }
 const tx=async(store,mode,fn)=>{const db=await openDB();return new Promise((res,rej)=>{
@@ -91,3 +90,14 @@ export async function postStockDoc({type,warehouseId,lines,user,notes='',allowNe
 export async function stockMap(){
   const m=new Map();for(const x of await all('movements')){const o=m.get(x.ProductID)||{};o[x.WarehouseID]=(o[x.WarehouseID]||0)+x.QuantityPieces;m.set(x.ProductID,o)}return m;
 }
+
+// معاملة عامة متعددة الجداول: fn(t, fail, setOut) — لو fail(err) اتندهت كل حاجة بتتلغي والـ Promise بيترفض بنفس الخطأ
+export function txRun(stores,fn){
+  return openDB().then(db=>new Promise((res,rej)=>{
+    const t=db.transaction(stores,'readwrite');let failed=null,out;
+    t.oncomplete=()=>res(out);t.onerror=()=>rej(failed||t.error);t.onabort=()=>rej(failed||t.error||new Error('تم الإلغاء'));
+    const fail=e=>{failed=e;try{t.abort()}catch{}};
+    try{fn(t,fail,v=>{out=v})}catch(e){fail(e)}
+  }));
+}
+export const ymd=(d=new Date())=>d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');

@@ -2,12 +2,10 @@ import {all,postStockDoc,stockMap,toPieces} from './db.js';
 import {can} from './auth.js';
 import {norm,compact} from './products.js';
 import {$,el,toast,fmt} from './ui.js';
+import {openScanner,scannerSupport} from './scanner.js';
 
 const T={IN:{type:'STOCK_IN',title:'استلام مخزون',en:'STOCK IN',btn:'تأكيد الاستلام',ok:'تم تسجيل الاستلام'},
          OUT:{type:'STOCK_OUT',title:'صرف من المخزن',en:'STOCK OUT',btn:'تأكيد الصرف',ok:'تم تسجيل الصرف'}};
-const SCAN_FORMATS=['qr_code','code_128','code_39','ean_13','ean_8','upc_a'];
-const cameraOK=()=>'BarcodeDetector' in window&&navigator.mediaDevices?.getUserMedia;
-const beep=()=>{try{const a=new (window.AudioContext||window.webkitAudioContext)(),o=a.createOscillator();o.frequency.value=880;o.connect(a.destination);o.start();setTimeout(()=>{o.stop();a.close()},90)}catch{}navigator.vibrate?.(40)};
 // محتوى الـ QR = كود الصنف بس (مع بادئة اختيارية). مفيش سعر ولا رصيد جواه.
 const parseScan=s=>String(s).trim().replace(/^ALIRAQI-PRODUCT-/i,'');
 
@@ -119,29 +117,13 @@ export async function showStockDoc(user,kind,onBack){
       el('button',{class:'btn ghost',onclick:onBack},'رجوع للرئيسية'))));
   }
 
-  // ---- مسح بالكاميرا (مسح متواصل) ----
-  async function openScanner(){
-    let stream,stop=false,last='',lastAt=0;
-    const video=el('video',{playsinline:'',muted:'',autoplay:''}),status=el('div',{class:'scanstatus'},'وجّه الكاميرا ناحية الباركود');
-    const close=()=>{stop=true;stream?.getTracks().forEach(t=>t.stop());ov.remove()};
-    const ov=el('div',{class:'overlay scan'},el('div',{class:'scanbox'},video,el('div',{class:'scanframe'}),status,
-      el('div',{class:'scanbar'},el('button',{class:'btn ghost',onclick:close},'إنهاء المسح'))));
-    document.body.append(ov);
-    try{
-      stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});video.srcObject=stream;await video.play();
-      const det=new BarcodeDetector({formats:SCAN_FORMATS});
-      const loop=async()=>{if(stop)return;
-        try{const c=await det.detect(video);
-          if(c.length){const v=c[0].rawValue,now=Date.now();
-            if(v!==last||now-lastAt>1800){last=v;lastAt=now;const r=addFromScanText(v);
-              if(r&&!Array.isArray(r)){beep();status.textContent='✔ '+r.Name+' — '+r.Code}
-              else if(Array.isArray(r)){status.textContent='أكتر من صنف بنفس الكود — اختار بعد الإنهاء';close();return}
-              else status.textContent='✖ كود غير معروف: '+v}}}catch{}
-        setTimeout(loop,220)};loop();
-    }catch{close();toast('تعذر تشغيل الكاميرا — اسمح بالوصول أو اكتب الكود يدوي')}
-  }
+  // ---- مسح بالكاميرا (مشترك: js/scanner.js) ----
+  const scanOnCode=text=>{const r=addFromScanText(text);
+    if(r&&!Array.isArray(r))return{status:'ok',label:r.Name+' — '+r.Code};return Array.isArray(r)?{status:'multi'}:{status:'unknown'}};
+  const openScan=()=>openScanner(scanOnCode);
 
-  const scanBtn=cameraOK()?el('button',{class:'btn scanb',type:'button',onclick:openScanner},'📷 مسح بالكاميرا'):null;
+  const sup=await scannerSupport();
+  const scanBtn=sup?el('button',{class:'btn scanb',type:'button',onclick:openScan},'📷 مسح بالكاميرا'):null;
   const unitSw=el('div',{class:'unit-switch2',role:'group','aria-label':'المسح يضيف'},
     ['carton','piece'].map(u=>el('button',{type:'button',class:u===scanUnit?'on':'','data-u':u,onclick:e=>{scanUnit=u;[...e.currentTarget.parentNode.children].forEach(b=>b.classList.toggle('on',b.dataset.u===u))}},u==='carton'?'المسح = كرتونة':'المسح = قطعة')));
   $('#app').replaceChildren(el('div',{class:'wrap'},
