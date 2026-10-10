@@ -1,5 +1,5 @@
 // تحديث الـ Service Worker بيغيّر الكاش بس — قاعدة البيانات (IndexedDB) مش بتتلمس أبداً
-const VER='v5', SHELL_CACHE='alr-shell-'+VER, IMG_CACHE='alr-img-v1';
+const VER='v6', SHELL_CACHE='alr-shell-'+VER, IMG_CACHE='alr-img-v1';
 // ملفات أساسية: لو واحد منها ناقص التثبيت يفشل (عشان نعرف). ملفات اختيارية: بتتحمّل لو موجودة بس.
 const CORE=['./','index.html','manifest.json','icon.svg','products.json','css/app.css',
   'js/db.js','js/auth.js','js/ui.js','js/products.js','js/stock.js','js/scanner.js','js/customers.js','js/app.js','js/jsQR.js'];
@@ -17,9 +17,9 @@ self.addEventListener('fetch',e=>{
   const req=e.request; if(req.method!=='GET')return;
   const url=new URL(req.url);
   if(url.origin===location.origin){
-    // أونلاين: أحدث نسخة (مع مهلة 3 ثواني)، أوفلاين: من الكاش
+    // أونلاين: أحدث نسخة (no-cache عشان كاش GitHub Pages 10 دقايق ما يرجّعش ملف قديم) مع مهلة 3 ثواني، أوفلاين: من الكاش
     e.respondWith((async()=>{
-      try{const res=await Promise.race([fetch(req),timeout(3000)]);
+      try{const res=await Promise.race([fetch(req,{cache:'no-cache'}),timeout(3000)]);
         if(res.ok){const cp=res.clone();caches.open(SHELL_CACHE).then(c=>c.put(req,cp))}return res}
       catch{return (await caches.match(req))||(await caches.match('index.html'))}})());
   }else if(req.destination==='image'){
