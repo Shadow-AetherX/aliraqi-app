@@ -51,3 +51,43 @@ export async function audit(user,action,entity,id,oldV,newV,deviceId){
 }
 export async function pendingCount(){const q=await byIndex('syncq','Status','PENDING');return q.length}
 export function deviceId(){let d=localStorage.getItem('alr_device');if(!d){d='D-'+uuid().slice(0,6).toUpperCase();localStorage.setItem('alr_device',d)}return d}
+
+// ---- ترحيل مستند مخزون (استلام/صرف) كوحدة واحدة: كل الحركات + طابور المزامنة + سجل العمليات في transaction واحدة ----
+// لو أي صنف رصيده مش كفاية (في الصرف) كل حاجة بتتلغي ومفيش حاجة بتتكتب.
+export async function postStockDoc({type,warehouseId,lines,user,notes='',allowNegative=false}){
+  if(!['STOCK_IN','STOCK_OUT'].includes(type)) throw new Error('نوع غير صالح');
+  const merged=new Map();                                 // دمج تكرار نفس الصنف
+  for(const l of lines){if(!Number.isInteger(l.qtyPieces)||l.qtyPieces<=0) throw new Error('كمية غير صالحة');merged.set(l.productId,(merged.get(l.productId)||0)+l.qtyPieces)}
+  if(!merged.size) throw new Error('مفيش أصناف في العملية');
+  const db=await openDB(),dev=deviceId(),docId=uuid(),now=nowISO(),sign=type==='STOCK_OUT'?-1:1;
+  return new Promise((resolve,reject)=>{
+    const t=db.transaction(['movements','syncq','audit'],'readwrite');
+    let failed=null;
+    t.oncomplete=()=>resolve({docId,count:merged.size});
+    t.onerror=()=>reject(failed||t.error); t.onabort=()=>reject(failed||t.error||new Error('تم الإلغاء'));
+    const mv=t.objectStore('movements'),sq=t.objectStore('syncq'),au=t.objectStore('audit');
+    const writeAll=()=>{
+      for(const [productId,q] of merged){
+        const m={MovementID:uuid(),DateTime:now,ProductID:productId,WarehouseID:warehouseId,MovementType:type,QuantityPieces:sign*q,
+          ReferenceID:docId,UserID:user.UserID,DeviceID:dev,SyncStatus:'PENDING',Notes:notes};
+        mv.put(m);sq.put({OpID:uuid(),Entity:'movements',EntityID:m.MovementID,Status:'PENDING',CreatedAt:now,Tries:0});
+      }
+      au.put({AuditID:uuid(),UserID:user.UserID,UserName:user.Name,Action:type,EntityType:'StockDoc',EntityID:docId,DateTime:now,DeviceID:dev,
+        OldValue:null,NewValue:JSON.stringify({warehouseId,lines:[...merged].map(([p,q])=>({p,q:sign*q})),allowNegative}),Notes:notes,SyncStatus:'PENDING'});
+    };
+    if(sign>0||allowNegative){writeAll();return}
+    let left=merged.size;
+    for(const [productId,q] of merged){
+      mv.index('ProductID').getAll(productId).onsuccess=e=>{
+        if(failed) return;
+        const avail=e.target.result.filter(m=>m.WarehouseID===warehouseId).reduce((s,m)=>s+m.QuantityPieces,0);
+        if(avail<q){failed=Object.assign(new Error('الرصيد مش كفاية'),{code:'INSUFFICIENT',productId,available:avail,requested:q});t.abort();return}
+        if(--left===0) writeAll();
+      };
+    }
+  });
+}
+// رصيد كل الأصناف: Map(productId -> {warehouseId: pieces})
+export async function stockMap(){
+  const m=new Map();for(const x of await all('movements')){const o=m.get(x.ProductID)||{};o[x.WarehouseID]=(o[x.WarehouseID]||0)+x.QuantityPieces;m.set(x.ProductID,o)}return m;
+}

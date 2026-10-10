@@ -1,6 +1,7 @@
 import {openDB,pendingCount,deviceId,all} from './db.js';
 import {seedIfEmpty,login,changePin,can} from './auth.js';
 import {seedProducts,showProducts} from './products.js';
+import {showStockDoc,showStockView} from './stock.js';
 import {$,el,toast} from './ui.js';
 async function renderStatus(){
   const n=await pendingCount().catch(()=>0);const on=navigator.onLine;
@@ -27,11 +28,13 @@ function showChangePin(user){
     el('button',{class:'btn',onclick:async()=>{(await changePin(user,p.value))?showDashboard(user):err.textContent='لازم 4 لـ 8 أرقام ومش 0000'}},'حفظ'),err));
 }
 const PRIMARY=[['StockOut','📦','صرف من المخزن','STOCK OUT','green'],['CreateInvoice','🧾','عمل فاتورة','CREATE INVOICE',''],['StockIn','📥','استلام مخزون','STOCK IN','']];
-const HANDLERS={'المنتجات':u=>showProducts(u,()=>showDashboard(u))};
+const back=u=>()=>showDashboard(u);
+const HANDLERS={'المنتجات':u=>showProducts(u,back(u)),'المخزون':u=>showStockView(u,back(u))};
+const PRIM_H={StockIn:u=>showStockDoc(u,'IN',back(u)),StockOut:u=>showStockDoc(u,'OUT',back(u))};
 const MODULES=[['ViewProducts','المنتجات'],['ViewCustomers','العملاء'],['ViewStock','المخزون'],['StockTransfer','نقل بين المخازن'],['ViewStock','المخازن'],['CreateInvoice','الفواتير'],['ViewReports','التقارير'],['ManageUsers','المستخدمين'],['ManageRoles','الأدوار والصلاحيات'],['ViewAudit','سجل العمليات'],['ManageSync','مركز المزامنة'],['ManageSettings','الإعدادات']];
 async function showDashboard(user){
   const soon=()=>toast('الشاشة دي لسه تحت التطوير');
-  const prim=[];for(const[p,ic,ar,en,cls]of PRIMARY) if(await can(user,p)) prim.push(el('button',{class:'big '+cls,onclick:soon},el('span',{class:'ic'},ic),ar,el('small',{},en)));
+  const prim=[];for(const[p,ic,ar,en,cls]of PRIMARY) if(await can(user,p)) prim.push(el('button',{class:'big '+cls,onclick:()=>(PRIM_H[p]||soon)(user)},el('span',{class:'ic'},ic),ar,el('small',{},en)));
   const tiles=[];for(const[p,ar]of MODULES) if(await can(user,p)) tiles.push(el('button',{class:'tile',onclick:()=>(HANDLERS[ar]||soon)(user)},ar));
   $('#app').replaceChildren(el('div',{class:'wrap'},
     el('div',{class:'hello'},el('h2',{},'أهلاً '+user.Name),el('button',{class:'btn ghost',onclick:showLogin},'خروج')),

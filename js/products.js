@@ -16,9 +16,9 @@ export async function seedProducts(){
 }
 
 // ---------- تطبيع البحث العربي ----------
-const norm=s=>String(s??'').toLowerCase().replace(/[\u064B-\u0652\u0640]/g,'').replace(/[أإآ]/g,'ا').replace(/ى/g,'ي').replace(/ة/g,'ه')
+export const norm=s=>String(s??'').toLowerCase().replace(/[\u064B-\u0652\u0640]/g,'').replace(/[أإآ]/g,'ا').replace(/ى/g,'ي').replace(/ة/g,'ه')
   .replace(/[٠-٩]/g,d=>'٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/\s+/g,' ').trim();
-const compact=s=>norm(s).replace(/[^a-z0-9\u0600-\u06ff]/g,'');
+export const compact=s=>norm(s).replace(/[^a-z0-9\u0600-\u06ff]/g,'');
 
 const PAGE=40;
 export async function showProducts(user,onBack){
